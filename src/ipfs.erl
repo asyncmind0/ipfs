@@ -44,8 +44,8 @@ ls(Pid, Hash, Timeout) ->
 add(Pid, File) ->
     add(Pid, File, 5000).
 
-add(Pid, {data, Data}, Timeout) ->
-    gen_server:call(Pid, {add_data, <<"/add">>, [], Data, Timeout}, Timeout);
+add(Pid, {data, Data, FileName}, Timeout) ->
+    gen_server:call(Pid, {add_data, <<"/add">>, [], Data, FileName, Timeout}, Timeout);
 
 add(Pid, File, Timeout) when is_binary(File) ->
     add(Pid, {file, File}, Timeout);
@@ -116,7 +116,7 @@ handle_call({add_file, URI, Args, File, BaseName, Timeout}, _From, State) ->
             {reply, Error, State}
     end;
 
-handle_call({add_data, URI, Args, Data, Timeout}, _From, State) ->
+handle_call({add_data, URI, Args, Data, FileName, Timeout}, _From, State) ->
     Boundary = cow_multipart:boundary(),
     StreamRef = gun:post(
         State#state.gun,
@@ -125,6 +125,7 @@ handle_call({add_data, URI, Args, Data, Timeout}, _From, State) ->
     ),
     InitData = iolist_to_binary([
         cow_multipart:part(Boundary, [
+            {<<"content-disposition">>, <<"form-data; name=\"filename\"; filename=\"", FileName/binary, "\"">>},
             {<<"content-type">>, <<"application/octet-stream">>}
         ])
     ]),

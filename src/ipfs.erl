@@ -216,7 +216,8 @@ wait_response(Pid, StreamRef, InitStatus, CT, Acc, Timeout) ->
       NewCT = proplists:get_value(<<"content-type">>, Headers, CT),
       wait_response(Pid, StreamRef, Status, NewCT, Acc, Timeout);
 
-    {response, fin, Status, _Headers} -> {ok, Status, Acc};
+    {response, fin, Status, _Headers} ->
+      {ok, Status, Acc};
 
     {data, nofin, Data} when is_function(Acc) ->
       Acc(Data),
@@ -229,13 +230,11 @@ wait_response(Pid, StreamRef, InitStatus, CT, Acc, Timeout) ->
       Acc(Data),
       {ok, InitStatus, Acc};
 
-    %{data, fin, _Data} when Acc =:= <<>> ->
-    %    {ok, InitStatus, <<>>};
     {data, fin, <<>>} when CT =:= <<"application/json">> ->
-      {ok, InitStatus, Acc};
+      {ok, InitStatus, [jsx:decode(A) || A <- string:split(Acc, "\n",all), A =/= <<>>]};
 
     {data, fin, Data} when CT =:= <<"application/json">> ->
-      {ok, InitStatus, <<Acc/binary, Data/binary>>};
+      {ok, InitStatus, [jsx:decode(A) || A <- string:split(<<Acc/binary, Data/binary>>, "\n",all), A =/= <<>>]};
 
     {data, fin, Data} ->
       {ok, InitStatus, <<Acc/binary, Data/binary>>};

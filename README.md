@@ -6,3 +6,4 @@
 * [x] cat
 * [x] add
 * [x] get
+* [x] version

@@ -3,29 +3,35 @@
 -export([all/0]).
 -export([init_per_suite/1]).
 -export([end_per_suite/1]).
+-export([version/1]).
 -export([add_file/1]).
 -export([add_data/1]).
 -export([ls/1]).
 -export([cat/1]).
 -export([get/1]).
+-export([sh/1]).
 
 -define(DATA_1MiB, <<0 : 8388608>>).
 -define(DATA_100MiB, <<0 : 838860800>>).
 -define(DATA_1MiB_HASH, <<"QmVkbauSDEaMP4Tkq6Epm9uW75mWm136n81YH8fGtfwdHU">>).
 -define(DATA_100MiB_HASH, <<"Qmca3PNFKuZnYkiVv1FpcV1AfDUm4qCSHoYjPTBqDAsyk8">>).
 
-all() -> [add_file, add_data, ls, cat, get].
+all() -> [version, add_file, add_data, ls, cat, get].
 
 init_per_suite(Config) ->
-  start_ipfs_container(),
   {ok, _Started} = application:ensure_all_started(ipfs),
   Config.
 
 
 end_per_suite(Config) ->
   application:stop(ipfs),
-  stop_ipfs_container(),
   Config.
+
+
+version(_Config) ->
+  {ok, Pid} = ipfs:start_link(#{ip => "127.0.0.1"}),
+  {ok, [#{<<"Version">> := _Version}]} = ipfs:version(Pid),
+  ipfs:stop(Pid).
 
 
 add_file(_Config) ->
@@ -70,28 +76,6 @@ get(_Config) ->
   file:delete(TmpFile),
   ipfs:stop(Pid).
 
-
-start_ipfs_container() ->
-  sh(["docker", "pull", "ipfs/go-ipfs:latest"], [0], 120000),
-  sh(
-    ["docker", "run", "--rm", "-d", "--name", "ipfs_test", "-p", "5001:5001", "ipfs/go-ipfs:latest"]
-  ),
-  wait_ipfs_container().
-
-
-wait_ipfs_container() ->
-  {0, Data} = sh(["docker", "logs", "ipfs_test"]),
-  Log = binary:split(Data, <<"\n">>, [global, trim_all]),
-  case lists:last(Log) of
-    <<"Daemon is ready">> -> ok;
-
-    _ ->
-      timer:sleep(500),
-      wait_ipfs_container()
-  end.
-
-
-stop_ipfs_container() -> sh(["docker", "container", "kill", "ipfs_test"]).
 
 sh(CmdList) -> sh(CmdList, [0], 5000).
 

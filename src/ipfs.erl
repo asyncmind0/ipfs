@@ -4,6 +4,7 @@
 
 -export([start_link/1]).
 -export([stop/1]).
+-export([version/1]).
 -export([ls/2]).
 -export([ls/3]).
 -export([add/2]).
@@ -21,18 +22,22 @@
 
 -record(state, {gun :: undefined | pid(), opts :: map()}).
 
+-define(DEFAULT_TIMEOUT, 5000).
+
 start_link(Opts) -> gen_server:start_link(?MODULE, Opts, []).
 
 stop(Pid) -> gen_server:call(Pid, stop).
 
-ls(Pid, Hash) -> ls(Pid, Hash, 5000).
+version(Pid) -> gen_server:call(Pid, {version, [], ?DEFAULT_TIMEOUT}, ?DEFAULT_TIMEOUT).
+
+ls(Pid, Hash) -> ls(Pid, Hash, ?DEFAULT_TIMEOUT).
 
 ls(Pid, Hash, Timeout) ->
   Args = [{<<"arg">>, Hash}],
-  gen_server:call(Pid, {get, <<"/ls">>, Args, Timeout}, Timeout).
+  gen_server:call(Pid, {ls, Args, Timeout}, Timeout).
 
 
-add(Pid, File) -> add(Pid, File, 5000).
+add(Pid, File) -> add(Pid, File, ?DEFAULT_TIMEOUT).
 
 add(Pid, {data, Data, FileName}, Timeout) ->
   gen_server:call(Pid, {add_data, <<"/add">>, [], Data, FileName, Timeout}, Timeout);
@@ -48,14 +53,14 @@ add(Pid, {file, File}, Timeout) ->
   gen_server:call(Pid, {add_file, <<"/add">>, Args, File, BaseName, Timeout}, Timeout).
 
 
-cat(Pid, Hash) -> cat(Pid, Hash, 5000).
+cat(Pid, Hash) -> cat(Pid, Hash, ?DEFAULT_TIMEOUT).
 
 cat(Pid, Hash, Timeout) ->
   Args = [{<<"arg">>, Hash}],
-  gen_server:call(Pid, {get, <<"/cat">>, Args, Timeout}, Timeout).
+  gen_server:call(Pid, {cat, Args, Timeout}, Timeout).
 
 
-get(Pid, Hash, FileName) -> get(Pid, Hash, FileName, 5000).
+get(Pid, Hash, FileName) -> get(Pid, Hash, FileName, ?DEFAULT_TIMEOUT).
 
 get(Pid, Hash, FileName, Timeout) ->
   Args = [{<<"arg">>, Hash}],
@@ -65,6 +70,7 @@ get(Pid, Hash, FileName, Timeout) ->
 init(Opts) -> {ok, #state{opts = Opts}, {continue, start_gun}}.
 
 handle_call({get, URI, Args, Timeout}, _From, State) ->
+  logger:info("ipfs request ~p", [format_uri(URI, Args)]),
   StreamRef = gun:get(State#state.gun, format_uri(URI, Args)),
   Response = wait_response(State#state.gun, StreamRef, Timeout),
   {reply, Response, State};
@@ -113,6 +119,20 @@ handle_call({add_file, URI, Args, File, BaseName, Timeout}, _From, State) ->
     Error -> {reply, Error, State}
   end;
 
+handle_call({cat, Args, Timeout}, _From, State) ->
+  URI = <<"/cat">>,
+  StreamRef =
+    gun:post(State#state.gun, format_uri(URI, Args), [{<<"content-type">>, <<"text/plain">>}]),
+  Response = wait_response(State#state.gun, StreamRef, Timeout),
+  {reply, Response, State};
+
+handle_call({ls, Args, Timeout}, _From, State) ->
+  URI = <<"/ls">>,
+  StreamRef =
+    gun:post(State#state.gun, format_uri(URI, Args), [{<<"content-type">>, <<"text/plain">>}]),
+  Response = wait_response(State#state.gun, StreamRef, Timeout),
+  {reply, Response, State};
+
 handle_call({add_data, URI, Args, Data, FileName, Timeout}, _From, State) ->
   Boundary = cow_multipart:boundary(),
   StreamRef =
@@ -156,6 +176,13 @@ handle_call({add_directory, URI, Args, DirectoryPath, Timeout}, _From, State) ->
   Response = wait_response(State#state.gun, StreamRef, Timeout),
   {reply, Response, State};
 
+handle_call({version, Args, Timeout}, _From, State) ->
+  URI = <<"/version">>,
+  StreamRef =
+    gun:post(State#state.gun, format_uri(URI, Args), [{<<"content-type">>, <<"text/plain">>}]),
+  Response = wait_response(State#state.gun, StreamRef, Timeout),
+  {reply, Response, State};
+
 handle_call(stop, _From, State) -> {stop, normal, ok, State}.
 
 
@@ -188,7 +215,7 @@ handle_continue(start_gun, #state{opts = #{ip := IP} = Opts} = State) ->
   GunOpts =
     #{
       retry => application:get_env(?MODULE, http_retry, 5),
-      retry_timeout => application:get_env(?MODULE, http_retry_timeout, 5000),
+      retry_timeout => application:get_env(?MODULE, http_retry_timeout, ?DEFAULT_TIMEOUT),
       http_opts => #{keepalive => infinity}
     },
   {ok, Gun} = gun:open(IP, maps:get(port, Opts, 5001), GunOpts),
@@ -216,8 +243,7 @@ wait_response(Pid, StreamRef, InitStatus, CT, Acc, Timeout) ->
       NewCT = proplists:get_value(<<"content-type">>, Headers, CT),
       wait_response(Pid, StreamRef, Status, NewCT, Acc, Timeout);
 
-    {response, fin, Status, _Headers} ->
-      {ok, Status, Acc};
+    {response, fin, Status, _Headers} -> {ok, Status, Acc};
 
     {data, nofin, Data} when is_function(Acc) ->
       Acc(Data),
@@ -231,14 +257,16 @@ wait_response(Pid, StreamRef, InitStatus, CT, Acc, Timeout) ->
       {ok, InitStatus, Acc};
 
     {data, fin, <<>>} when CT =:= <<"application/json">> ->
-      {ok, InitStatus, [jsx:decode(A) || A <- string:split(Acc, "\n",all), A =/= <<>>]};
+      {ok, InitStatus, [jsx:decode(A) || A <- string:split(Acc, "\n", all), A =/= <<>>]};
 
     {data, fin, Data} when CT =:= <<"application/json">> ->
-      {ok, InitStatus, [jsx:decode(A) || A <- string:split(<<Acc/binary, Data/binary>>, "\n",all), A =/= <<>>]};
+      {
+        ok,
+        InitStatus,
+        [jsx:decode(A) || A <- string:split(<<Acc/binary, Data/binary>>, "\n", all), A =/= <<>>]
+      };
 
-    {data, fin, Data} ->
-      {ok, InitStatus, <<Acc/binary, Data/binary>>};
-
+    {data, fin, Data} -> {ok, InitStatus, <<Acc/binary, Data/binary>>};
     Error -> Error
   end.
 
@@ -276,7 +304,7 @@ recursively_add_dir(DirectoryPath, GunState, StreamRef, Boundary) ->
         FilePath = filename:join(DirectoryPath, File),
         case filelib:is_dir(FilePath) of
           true ->
-            directory_part(GunState, StreamRef, Boundary, File),
+            directory_part(GunState, StreamRef, Boundary, FilePath),
             recursively_add_dir(FilePath, GunState, StreamRef, Boundary);
 
           false ->
@@ -295,7 +323,11 @@ stream_multipart_body(GunState, StreamRef, Boundary, DirectoryPath) ->
 
 % Function to create a directory part in the multipart/form-data request
 directory_part(GunState, StreamRef, Boundary, DirectoryName) ->
-  DirectoryNameBin = list_to_binary(DirectoryName),
+  DirectoryNameBin =
+    case is_binary(DirectoryName) of
+      false -> list_to_binary(DirectoryName);
+      true -> DirectoryName
+    end,
   InitData =
     iolist_to_binary(
       [
@@ -316,8 +348,16 @@ directory_part(GunState, StreamRef, Boundary, DirectoryName) ->
 
 % Function to create a file part in the multipart/form-data request
 file_part(GunState, StreamRef, Boundary, DirectoryPath, FileName) ->
-  FileNameBin = list_to_binary(FileName),
-  DirectoryPathBin = list_to_binary(DirectoryPath),
+  FileNameBin =
+    case is_binary(FileName) of
+      false -> list_to_binary(FileName);
+      true -> FileName
+    end,
+  DirectoryPathBin =
+    case is_binary(DirectoryPath) of
+      false -> list_to_binary(DirectoryPath);
+      true -> DirectoryPath
+    end,
   InitData =
     iolist_to_binary(
       [

@@ -78,7 +78,8 @@ handle_call({get, URI, Args, Timeout}, _From, State) ->
 handle_call({get_file, URI, Args, FileName, Timeout}, _From, State) ->
   case file:open(FileName, [write, raw, binary]) of
     {ok, FD} ->
-      StreamRef = gun:get(State#state.gun, format_uri(URI, Args)),
+      StreamRef =
+        gun:post(State#state.gun, format_uri(URI, Args), [{<<"content-type">>, <<"text/plain">>}]),
       wait_response(State#state.gun, StreamRef, fun (Data) -> file:write(FD, Data) end, Timeout),
       file:close(FD),
       {reply, ok, State};
@@ -207,7 +208,10 @@ handle_info({gun_down, _Pid, _Proto, Reason, _KilledStreams}, State) ->
   {noreply, State};
 
 handle_info({'DOWN', _Ref, process, _Pid, Reason}, State) ->
-  logger:error("connection terminated, reason: ~p", [Reason]),
+  logger:error(
+    "ipfs connection terminated, reason: ~p host: ~p port: ~p ~p",
+    [Reason, maps:get(host, State#state.opts), maps:get(port, State#state.opts)]
+  ),
   {noreply, State, {continue, start_gun}}.
 
 

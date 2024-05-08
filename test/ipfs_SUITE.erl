@@ -48,11 +48,13 @@ add_data(_Config) ->
   {ok, Pid} = ipfs:start_link(#{ip => "127.0.0.1"}),
   {
     ok,
-    [#{
-      <<"Hash">> := ?DATA_100MiB_HASH,
-      <<"Name">> := ?DATA_100MiB_HASH,
-      <<"Size">> := <<"104882589">>
-    }]
+    [
+      #{
+        <<"Hash">> := ?DATA_100MiB_HASH,
+        <<"Name">> := ?DATA_100MiB_HASH,
+        <<"Size">> := <<"104882589">>
+      }
+    ]
   } = ipfs:add(Pid, {data, ?DATA_100MiB}, 60000),
   ipfs:stop(Pid).
 

@@ -203,6 +203,9 @@ handle_info({gun_data, _Pid, _Resp, nofin, Data}, State) ->
 
 handle_info({gun_up, _Pid, _Proto}, State) -> {noreply, State};
 
+handle_info({gun_down, _Pid, _Proto, normal, _KilledStreams}, State) ->
+  logger:debug("connection down, reason: ~p", [normal]),
+  {noreply, State};
 handle_info({gun_down, _Pid, _Proto, Reason, _KilledStreams}, State) ->
   logger:error("connection down, reason: ~p", [Reason]),
   {noreply, State};

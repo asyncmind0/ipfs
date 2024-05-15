@@ -19,6 +19,7 @@
 -export([handle_info/2]).
 -export([handle_continue/2]).
 -export([terminate/2]).
+-include_lib("kernel/include/logger.hrl").
 
 -record(state, {gun :: undefined | pid(), opts :: map()}).
 
@@ -70,7 +71,7 @@ get(Pid, Hash, FileName, Timeout) ->
 init(Opts) -> {ok, #state{opts = Opts}, {continue, start_gun}}.
 
 handle_call({get, URI, Args, Timeout}, _From, State) ->
-  logger:info("ipfs request ~p", [format_uri(URI, Args)]),
+  ?LOG_INFO("ipfs request ~p", [format_uri(URI, Args)]),
   StreamRef = gun:get(State#state.gun, format_uri(URI, Args)),
   Response = wait_response(State#state.gun, StreamRef, Timeout),
   {reply, Response, State};
@@ -190,31 +191,33 @@ handle_call(stop, _From, State) -> {stop, normal, ok, State}.
 handle_cast(_Req, State) -> {noreply, State}.
 
 handle_info({gun_response, _Pid, Resp, nofin, Status, _Headers}, State) ->
-  logger:info("response , reason: ~p status ~p", [Resp, Status]),
+  ?LOG_INFO("response , reason: ~p status ~p", [Resp, Status]),
   {noreply, State};
 
 handle_info({gun_data, _Pid, Resp, fin, <<>>}, State) ->
-  logger:info("response , data fin: ~p ", [Resp]),
+  ?LOG_INFO("response , data fin: ~p ", [Resp]),
   {noreply, State};
 
 handle_info({gun_data, _Pid, _Resp, nofin, Data}, State) ->
-  logger:info("response , data: ~p ", [Data]),
+  ?LOG_INFO("response , data: ~p ", [Data]),
   {noreply, State};
 
 handle_info({gun_up, _Pid, _Proto}, State) -> {noreply, State};
 
 handle_info({gun_down, _Pid, _Proto, normal, _KilledStreams}, State) ->
-  logger:debug("connection down, reason: ~p", [normal]),
+  ?LOG_DEBUG("connection down, reason: ~p", [normal]),
   {noreply, State};
 handle_info({gun_down, _Pid, _Proto, Reason, _KilledStreams}, State) ->
-  logger:error("connection down, reason: ~p", [Reason]),
+  ?LOG_ERROR("connection down, reason: ~p, state: ~p", [Reason, State]),
   {noreply, State};
 
+handle_info({'DOWN', _Ref, process, _Pid, {shutdown, econnrefused}}, State) ->
+  ?LOG_DEBUG(
+  "connection refused, state: ~p", [State]),
+  {noreply, State, {continue, start_gun}};
 handle_info({'DOWN', _Ref, process, _Pid, Reason}, State) ->
-  logger:error(
-    "ipfs connection terminated, reason: ~p host: ~p port: ~p ~p",
-    [Reason, maps:get(host, State#state.opts), maps:get(port, State#state.opts)]
-  ),
+  ?LOG_ERROR(
+  "connection down, reason: ~p, state: ~p", [Reason, State]),
   {noreply, State, {continue, start_gun}}.
 
 
@@ -392,5 +395,5 @@ file_part(GunState, StreamRef, Boundary, DirectoryPath, FileName) ->
   gun:data(GunState, StreamRef, nofin, InitData),
   case file:open(filename:join(DirectoryPath, FileName), [read, binary, raw]) of
     {ok, FD} -> do_sendfile_nofin(GunState, StreamRef, Boundary, FD);
-    Error -> logger:error("error File part ~p ", [Error])
+    Error -> ?LOG_ERROR("error File part ~p ", [Error])
   end.

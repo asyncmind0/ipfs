@@ -7,6 +7,7 @@
 -export([version/1]).
 -export([ls/2]).
 -export([ls/3]).
+-export([pin/2]).
 -export([add/2]).
 -export([add/3]).
 -export([cat/2]).
@@ -37,7 +38,9 @@ ls(Pid, Hash, Timeout) ->
   Args = [{<<"arg">>, Hash}],
   gen_server:call(Pid, {ls, Args, Timeout}, Timeout).
 
-
+pin(Pid, Hashes) ->
+  gen_server:call(Pid, {pin, <<"/pin/add">>, Hashes}, ?DEFAULT_TIMEOUT).
+    
 add(Pid, File) -> add(Pid, File, ?DEFAULT_TIMEOUT).
 
 add(Pid, {data, Data, FileName}, Timeout) ->
@@ -88,6 +91,11 @@ handle_call({get_file, URI, Args, FileName, Timeout}, _From, State) ->
     Error -> {reply, Error, State}
   end;
 
+handle_call({pin, URI, Hashes,  Timeout}, _From, State) ->
+      StreamRef =
+        gun:post(State#state.gun, format_uri(URI, {<<"arg">> ,Hashes}), [{<<"content-type">>, <<"text/plain">>}]),
+      Response = wait_response(State#state.gun, StreamRef, Timeout),
+      {reply, Response, State};
 handle_call({add_file, URI, Args, File, BaseName, Timeout}, _From, State) ->
   case file:open(File, [read, binary, raw]) of
     {ok, FD} ->
@@ -205,7 +213,7 @@ handle_info({gun_data, _Pid, _Resp, nofin, Data}, State) ->
 handle_info({gun_up, _Pid, _Proto}, State) -> {noreply, State};
 
 handle_info({gun_down, _Pid, _Proto, normal, _KilledStreams}, State) ->
-  ?LOG_DEBUG("connection down, reason: ~p", [normal]),
+  ?LOG_DEBUG("ipfs connection down, reason: ~p", [normal]),
   {noreply, State};
 handle_info({gun_down, _Pid, _Proto, Reason, _KilledStreams}, State) ->
   ?LOG_ERROR("connection down, reason: ~p, state: ~p", [Reason, State]),

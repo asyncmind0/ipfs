@@ -213,7 +213,6 @@ handle_info({gun_data, _Pid, _Resp, nofin, Data}, State) ->
 handle_info({gun_up, _Pid, _Proto}, State) -> {noreply, State};
 
 handle_info({gun_down, _Pid, _Proto, normal, _KilledStreams}, State) ->
-  ?LOG_DEBUG("ipfs connection down, reason: ~p", [normal]),
   {noreply, State};
 handle_info({gun_down, _Pid, _Proto, Reason, _KilledStreams}, State) ->
   ?LOG_ERROR("connection down, reason: ~p, state: ~p", [Reason, State]),
@@ -229,16 +228,24 @@ handle_info({'DOWN', _Ref, process, _Pid, Reason}, State) ->
   {noreply, State, {continue, start_gun}}.
 
 
-handle_continue(start_gun, #state{opts = #{ip := IP} = Opts} = State) ->
-  GunOpts =
-    #{
-      retry => application:get_env(?MODULE, http_retry, 5),
-      retry_timeout => application:get_env(?MODULE, http_retry_timeout, ?DEFAULT_TIMEOUT),
-      http_opts => #{keepalive => infinity}
+handle_continue(start_gun, #state{opts = Opts} = State) ->
+    IP = maps:get(ip, Opts),
+    Port = maps:get(port, Opts, 5001),
+
+    GunOpts = #{
+        retry => application:get_env(?MODULE, http_retry, 5),
+        retry_timeout => application:get_env(?MODULE, http_retry_timeout, ?DEFAULT_TIMEOUT),
+        http_opts => #{keepalive => infinity}
     },
-  {ok, Gun} = gun:open(IP, maps:get(port, Opts, 5001), GunOpts),
-  erlang:monitor(process, Gun),
-  {noreply, State#state{gun = Gun}}.
+
+    case gun:open(IP, Port, GunOpts) of
+        {ok, Gun} ->
+            erlang:monitor(process, Gun),
+            {noreply, State#state{gun = Gun}};
+        {error, Reason} ->
+            ?LOG_ERROR("gun open failed ip=~p port=~p reason=~p", [IP, Port, Reason]),
+            {stop, Reason, State}
+    end.
 
 
 terminate(_Reason, State) -> gun:close(State#state.gun).
